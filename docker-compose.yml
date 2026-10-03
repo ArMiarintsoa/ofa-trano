@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: madarent_scraper
+    volumes:
+      # Persister les données brutes et traitées sur l'hôte
+      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Mode une seule exécution (ex: déclenché manuellement ou par cron hôte)
+    restart: "no"
+
+  # Exemple si vous souhaitez ajouter un service d'entraînement ou une API plus tard:
+  # pipeline:
+  #   build: .
+  #   container_name: madarent_pipeline
+  #   command: python pipeline/train.py
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./models:/app/models
