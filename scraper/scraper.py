@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 def get_rendered_html(page, url: str) -> str:
     """Charge une page et attend que le JS ait fini de rendre le contenu."""
-    page.goto(url, wait_until="networkidle", timeout=30000)
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
     # Attente explicite supplémentaire si le site charge en plusieurs vagues
     page.wait_for_timeout(1500)
     return page.content()
@@ -41,7 +41,7 @@ async def fetch_rendered_html(url: str) -> str:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         )
         page = context.new_page()
-        page.goto(url, wait_until="networkidle", timeout=30000)
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)  # laisse le temps au JS de tout charger
         html = page.content()
         browser.close()
@@ -52,31 +52,25 @@ def parse_address(card) -> dict:
     l'icône, pas sur la position (plus robuste si l'ordre change)."""
     address = {"ville": None, "lieu": None}
     
-    address_row = card.select_one(".address-row")
+    address_row = card.select_one(".title-place").get_text() 
     if not address_row:
-        return address
-    
-    for bullet in address_row.select("span.bullet"):
-        icon = bullet.select_one("iconify-icon")
-        icon_name = icon.get("icon") if icon else None
-        
-        # Le texte est après le tag iconify-icon, pas dedans
-        text = bullet.get_text(strip=True)
-        
-        if icon_name == "solar:city-linear":
-            address["ville"] = text
-        elif icon_name == "solar:map-point-linear":
-            address["lieu"] = text
-    
+        return address    
+    import re
+    element = re.split(r'[,]',address_row, maxsplit=1)
+    if(element[0] and element[1]):
+        address["lieu"] = element[0].strip()
+        address["ville"]=element[1].strip()    
+    else:
+        address["ville"]=element[0].strip()
     return address
 
 def parse_essential_info(content) -> dict:
     info = {"pieces": None,"chambres": None, "cuisine": None, "toilettes": None, "Accès moto": None, "Accès voiture": None, "Charges": None}
     
-    grid  = content.select_one("div.infos-grid")
+    grid  = content.select_one("div.specs-row")    
     if not grid:
         return info
-    bullets = grid.select("span.bullet")
+    bullets = grid.select("span.fact-chip")
     for bullet in bullets:                
         icon = bullet.select_one("iconify-icon")        
         icon_name = icon.get("icon") if icon else None
@@ -95,16 +89,27 @@ def parse_essential_info(content) -> dict:
             case "solar:lightbulb-linear":
                 info["Charges"] = text
             case "ph:car":
-                info["Accès voiture"] = text            
+                info["Accès voiture"] = text               
     return info
 
 def parse_one_listing(html: str) -> dict:
     listing = {}    
     soup  = BeautifulSoup(html, "html.parser")    
-    content = soup.select_one('.content')  
+    content = soup.select_one('.house-body')      
     address = parse_address(content)
-    essential_info = parse_essential_info(content)
-    listing = {**address,**essential_info,"description": _safe_text(content.select_one("#house-description")),"prix": _clean_price(_safe_text(content.select_one(".price-row span.price"))), "unité du prix":_safe_text(content.select_one(".price-row .price-unit")),"titre": _safe_text(content.select_one(".listing-title")), "durée": _safe_text(content.select_one(".meta-time span")), "note": _safe_text(content.select_one('.meta-rating span')), "vues": _safe_text(content.select_one('.meta-rating span.views')), "type": _safe_text(content.select_one('div.house-badges span.badge-ghost'))}    
+    essential_info = parse_essential_info(content)    
+    listing = {
+        **address,
+        **essential_info,
+        "description": _safe_text(content.select_one("div.description-text")),
+        "prix": _clean_price(_safe_text(content.select_one(".price-row span.price"))), 
+        "unité du prix":_safe_text(content.select_one(".price-row .price-unit")),
+        "titre": _safe_text(content.select_one(".listing-title")), 
+        # "durée": _safe_text(content.select_one(".meta-time span")), 
+        # "note": _safe_text(content.select_one('.meta-rating span')), 
+        # "vues": _safe_text(content.select_one('.meta-rating span.views')), 
+        "type": _safe_text(content.select_one('div.house-badges span.badge-ghost'))
+    }    
     return listing
 
 def parse_listings(html: str, page) -> list[dict]:
@@ -118,18 +123,18 @@ def parse_listings(html: str, page) -> list[dict]:
 
     for card in cards:
         try:
-            link = card.select_one("a")["href"] if card.select_one("a") else None
+            link = card.select_one("a")["href"] if card.select_one("a") else None            
             if link:
                 try:
-                    content = get_rendered_html(page,f'{BASE_URL}{link}')                                             
+                    content = get_rendered_html(page,f'{BASE_URL}{link}')                                                        
                 except Exception as e:
-                    logger.warning(f"Erreur parsing d'une annonce: {e}")
+                    logger.warning(f"Erreur parsing d'une annonce 1: {e}")
                     continue
                 listing = parse_one_listing(content)                            
             
             listings.append(listing)
         except Exception as e:
-            logger.warning(f"Erreur parsing d'une annonce: {e}")
+            logger.warning(f"Erreur parsing d'une annonce 2: {e}")
             continue
 
     return listings
@@ -165,7 +170,7 @@ def parse_number_results(html:str)-> int:
 
 
 def calculateMaxPages(page) -> int:
-    url = f"{BASE_URL}/recherche?sort=rating&page={1}" 
+    url = f"{BASE_URL}/?sort=rating&page={1}" 
     try:
         html = get_rendered_html(page, url)
         import math
@@ -191,7 +196,7 @@ def scrape_all_pages() -> pd.DataFrame:
         logger.info(f'Nombre de page: {MAX_PAGES}')
 
         for page_num in range(1, MAX_PAGES + 1):
-            url = f"{BASE_URL}/recherche?sort=rating&page={page_num}"            
+            url = f"{BASE_URL}/?sort=rating&page={page_num}"            
             logger.info(f"Scraping page {page_num}: {url}")            
 
             try:
