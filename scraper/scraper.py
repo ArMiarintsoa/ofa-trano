@@ -232,7 +232,7 @@ def save_data(df: pd.DataFrame) -> Path:
 
 
 def main():
-    logger.info("Début du scraping MadaRent")
+    logger.info("Début du scraping MadaRentttttttttttttttttt")
     df = scrape_all_pages()
 
     if df.empty:
