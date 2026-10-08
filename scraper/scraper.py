@@ -65,7 +65,7 @@ def parse_address(card) -> dict:
     return address
 
 def parse_essential_info(content) -> dict:
-    info = {"pieces": None,"chambres": None, "cuisine": None, "toilettes": None, "Accès moto": None, "Accès voiture": None, "Charges": None}
+    info = {"pieces": None,"chambres": None, "cuisine": None, "toilettes": None, "Acces moto": None, "Acces voiture": None, "Charges": None}
     
     grid  = content.select_one("div.specs-row")    
     if not grid:
@@ -85,11 +85,11 @@ def parse_essential_info(content) -> dict:
             case "solar:bath-linear":
                 info["toilettes"] = text
             case "ph:motorcycle":
-                info["Accès moto"] = text
+                info["Acces moto"] = text
             case "solar:lightbulb-linear":
                 info["Charges"] = text
             case "ph:car":
-                info["Accès voiture"] = text               
+                info["Acces voiture"] = text               
     return info
 
 def parse_one_listing(html: str) -> dict:
