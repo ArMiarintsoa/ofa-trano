@@ -24,8 +24,11 @@ RUN playwright install --with-deps chromium
 # Copie du reste de l'application
 COPY . .
 
+# Rendre le script d'entrée exécutable
+RUN chmod +x entrypoint.sh
+
 # Création du dossier de destination des données si inexistant
 RUN mkdir -p data/raw data/processed
 
-# Commande par défaut pour exécuter le scraper
-CMD ["python", "scraper/scraper.py"]
+# Commande par défaut : scraper → nettoyage
+CMD ["sh", "entrypoint.sh"]

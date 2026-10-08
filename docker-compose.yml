@@ -1,24 +1,32 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  scraper:
+  # ── Exécuté régulièrement (manuellement ou par cron) ──────────────────────
+  pipeline:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: madarent_scraper
+    container_name: madarent_pipeline
     volumes:
-      # Persister les données brutes et traitées sur l'hôte
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
-    # Mode une seule exécution (ex: déclenché manuellement ou par cron hôte)
+    # Lance entrypoint.sh : scraper.py → clean.py en séquence
     restart: "no"
 
-  # Exemple si vous souhaitez ajouter un service d'entraînement ou une API plus tard:
-  # pipeline:
-  #   build: .
-  #   container_name: madarent_pipeline
-  #   command: python pipeline/train.py
-  #   volumes:
-  #     - ./data:/app/data
-  #     - ./models:/app/models
+  # ── Exécuté ponctuellement (entraînement du modèle) ───────────────────────
+  # Lancer avec : docker-compose --profile train run --rm train
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: madarent_train
+    command: ["python", "pipeline/train.py"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: "no"
+    profiles:
+      - train

@@ -47,7 +47,7 @@ def save_clean_data(df: pd.DataFrame, output_dir="data/processed"):
     return filepath
 
 latest_file = get_latest_raw_file()
-lo
+logger.info(f"Fichier source : {latest_file}")
 df = pd.read_csv(latest_file)
 
 df["pieces"] = df["pieces"].apply(clean_pieces)
