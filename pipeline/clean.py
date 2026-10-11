@@ -53,20 +53,20 @@ df = pd.read_csv(latest_file)
 df["pieces"] = df["pieces"].apply(clean_pieces)
 df["chambres"] = df["chambres"].apply(clean_pieces)
 df["pieces"] = df["pieces"].combine_first(df["chambres"]).fillna(0).astype("Int64")
-df = df.drop(columns="chambres", axis=1)
+df = df.drop(columns="chambres")
 
 df["cuisine"] = df["cuisine"].apply(to_boolean_presence)
 df["Charges"] = df["Charges"].apply(to_boolean_presence)
 
 df["toilettes_presence"] = df["toilettes"].notna()
 df["toilettes_count"] = df["toilettes"].apply(extract_toilet_count)
-df = df.drop(columns="toilettes", axis=1)
+df = df.drop(columns="toilettes")
 
 df["Acces moto"] = df["Acces moto"].notna()
 df["Acces voiture"] = df["Acces voiture"].notna()
 
-df = df.drop(columns="description", axis=1)
-df = df.drop(columns="titre", axis=1)
+df = df.drop(columns="description")
+df = df.drop(columns="titre")
 
 df = df.dropna(subset=["prix"])
 df["prix_mensuel"] = np.where(
@@ -74,7 +74,7 @@ df["prix_mensuel"] = np.where(
     df["prix"] * 30,
     df["prix"]
 )
-df = df.drop(columns=["prix", "unité du prix"], axis=1)
+df = df.drop(columns=["prix", "unité du prix"])
 
 encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
 encoded = encoder.fit_transform(df[["ville", "lieu", "type"]])
