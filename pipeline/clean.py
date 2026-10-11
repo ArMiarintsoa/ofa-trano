@@ -43,7 +43,9 @@ def save_clean_data(df: pd.DataFrame, output_dir="data/processed"):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     timestamp = pd.Timestamp.now().strftime("%Y-%m-%d_%H%M%S")
     filepath = Path(output_dir) / f"madarent_clean_{timestamp}.csv"
+    logger.info(f"Chemin du fichier : {filepath}")
     df.to_csv(filepath, index=False)
+    logger.info(f"Données sauvegardées")
     return filepath
 
 latest_file = get_latest_raw_file()
@@ -51,37 +53,49 @@ logger.info(f"Fichier source : {latest_file}")
 df = pd.read_csv(latest_file)
 
 df["pieces"] = df["pieces"].apply(clean_pieces)
+logger.info(f"Nettoyage pièce terminé")
 df["chambres"] = df["chambres"].apply(clean_pieces)
+logger.info(f"Nettoyage chambre terminé")
 df["pieces"] = df["pieces"].combine_first(df["chambres"]).fillna(0).astype("Int64")
 df = df.drop(columns="chambres")
+logger.info(f"Fusion pièce et chambre terminée")
 
 df["cuisine"] = df["cuisine"].apply(to_boolean_presence)
 df["Charges"] = df["Charges"].apply(to_boolean_presence)
+logger.info(f"Nettoyage cuisine et charges terminé")
 
 df["toilettes_presence"] = df["toilettes"].notna()
 df["toilettes_count"] = df["toilettes"].apply(extract_toilet_count)
 df = df.drop(columns="toilettes")
+logger.info(f"Nettoyage toilettes terminé")
 
 df["Acces moto"] = df["Acces moto"].notna()
 df["Acces voiture"] = df["Acces voiture"].notna()
+logger.info(f"Nettoyage acces terminé")
 
 df = df.drop(columns="description")
 df = df.drop(columns="titre")
+logger.info(f"Suppression colonne description et titre terminé")
 
 df = df.dropna(subset=["prix"])
+logger.info(f"Suppression ligne avec prix manquant terminé")
 df["prix_mensuel"] = np.where(
     df["unité du prix"] == "/jour",
     df["prix"] * 30,
     df["prix"]
 )
 df = df.drop(columns=["prix", "unité du prix"])
+logger.info(f"Conversion prix en mensuel terminé")
 
 encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
 encoded = encoder.fit_transform(df[["ville", "lieu", "type"]])
+logger.info(f"Encodage one-hot terminé")
 
 encoded_df = pd.DataFrame(encoded, columns=encoder.get_feature_names_out(["ville", "lieu", "type"]))
 df = pd.concat([df.reset_index(drop=True), encoded_df], axis=1)
+logger.info(f"Concaté terminé")
 
 df = df.drop(columns=["ville", "lieu", "type"])
+logger.info(f"Suppression des colonnes ville, lieu et type terminé")
 
 save_clean_data(df)
