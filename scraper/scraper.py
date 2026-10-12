@@ -225,7 +225,7 @@ def scrape_all_pages() -> pd.DataFrame:
 def save_data(df: pd.DataFrame) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    filepath = OUTPUT_DIR / f"madarent_{timestamp}.csv"
+    filepath = OUTPUT_DIR / f"madarent_raw_{timestamp}.csv"
     df.to_csv(filepath, index=False, encoding="utf-8")
     logger.info(f"Données sauvegardées: {filepath} ({len(df)} lignes)")
     return filepath

@@ -12,7 +12,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def get_latest_raw_file(raw_dir="data/raw") -> Path:
-    files = list(Path(raw_dir).glob("madarent_*.csv"))
+    files = list(Path(raw_dir).glob("madarent_raw_*.csv"))
     if not files:
         raise FileNotFoundError(f"Aucun fichier trouvé dans {raw_dir}")
     return max(files, key=lambda f: f.name)
@@ -87,15 +87,8 @@ df["prix_mensuel"] = np.where(
 df = df.drop(columns=["prix", "unité du prix"])
 logger.info(f"Conversion prix en mensuel terminé")
 
-encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-encoded = encoder.fit_transform(df[["ville", "lieu", "type"]])
-logger.info(f"Encodage one-hot terminé")
-
-encoded_df = pd.DataFrame(encoded, columns=encoder.get_feature_names_out(["ville", "lieu", "type"]))
-df = pd.concat([df.reset_index(drop=True), encoded_df], axis=1)
-logger.info(f"Concaté terminé")
-
-df = df.drop(columns=["ville", "lieu", "type"])
-logger.info(f"Suppression des colonnes ville, lieu et type terminé")
+# On supprime la colonne car c'est toujours false pour le scraper actuel
+df = df.drop(columns="Charges")
+logger.info(f"Suppression colonne charges terminé")
 
 save_clean_data(df)
