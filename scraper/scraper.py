@@ -13,12 +13,15 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import re
+from urllib.parse import urlencode
 
 # --- Configuration ---
 BASE_URL = "https://app.madarent.mg"
 OUTPUT_DIR = Path("data/raw")
 DELAY_RANGE = (2, 5)  # secondes entre chaque requête, pour être respectueux du serveur
 NBR_CARDS_PER_PAGE = 20
+PROPERTY_TYPES = ("house", "villa", "apartment", "studio", "commercial")
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,16 +55,17 @@ def parse_address(card) -> dict:
     l'icône, pas sur la position (plus robuste si l'ordre change)."""
     address = {"ville": None, "lieu": None}
     
-    address_row = card.select_one(".title-place").get_text() 
+    address_row = card.select_one(".title-place").get_text()     
     if not address_row:
         return address    
+    
     import re
-    element = re.split(r'[,]',address_row, maxsplit=1)
-    if(element[0] and element[1]):
-        address["lieu"] = element[0].strip()
-        address["ville"]=element[1].strip()    
+    parts = [p.strip() for p in address_row.split(",", maxsplit=1)]
+
+    if len(parts) == 2 and parts[0] and parts[1]:
+        address["lieu"], address["ville"] = parts
     else:
-        address["ville"]=element[0].strip()
+        address["ville"] = parts[0]
     return address
 
 def parse_essential_info(content) -> dict:
@@ -169,8 +173,11 @@ def parse_number_results(html:str)-> int:
     return result_count
 
 
-def calculateMaxPages(page) -> int:
-    url = f"{BASE_URL}/?sort=rating&page={1}" 
+def calculate_max_pages(property_type, page) -> int:
+    # Build the URL for the search query using urlencode
+    params = {"property_type": property_type}
+    search_url = urlencode(params)
+    url = f"{BASE_URL}/?{search_url}" 
     try:
         html = get_rendered_html(page, url)
         import math
@@ -179,7 +186,41 @@ def calculateMaxPages(page) -> int:
     except Exception as e:
         logger.error(f"Échec chargement page {1}: {e}")
     return 0
-       
+
+
+def build_url(property_type: str, page_num: int) -> str:
+    params = {"property_type": property_type, "page": page_num}
+    return f"{BASE_URL}/?{urlencode(params)}"
+
+
+def scrape_property_type(page, property_type: str) -> list[dict]:
+    """Scrape toutes les pages d'un type de bien."""
+    listings = []
+    max_pages = calculate_max_pages(property_type, page)
+    logger.info(f"{property_type}: {max_pages} page(s)")
+
+    for page_num in range(1, max_pages + 1):
+        url = build_url(property_type, page_num)
+        logger.info(f"Scraping {property_type} page {page_num}/{max_pages}: {url}")
+
+        try:
+            html = get_rendered_html(page, url)
+        except Exception as e:
+            logger.error(f"Échec chargement page {page_num}: {e}")
+            continue  # passe à la page suivante du même type
+
+        page_listings = parse_listings(html, page)
+        if not page_listings:
+            logger.info(f"Aucune annonce page {page_num}, arrêt de {property_type}.")
+            break  # arrête seulement ce type de bien
+
+        listings.extend(page_listings)
+        logger.info(f"  -> {len(page_listings)} annonces récupérées")
+
+        # Délai aléatoire pour ne pas surcharger le serveur
+        time.sleep(random.uniform(*DELAY_RANGE))
+
+    return listings
 
 
 def scrape_all_pages() -> pd.DataFrame:
@@ -187,40 +228,16 @@ def scrape_all_pages() -> pd.DataFrame:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-        page = context.new_page()        
+        try:
+            context = browser.new_context(user_agent=USER_AGENT)
+            page = context.new_page()
 
-        MAX_PAGES = calculateMaxPages(page) 
-        logger.info(f'Nombre de page: {MAX_PAGES}')
-
-        for page_num in range(1, MAX_PAGES + 1):
-            url = f"{BASE_URL}/?sort=rating&page={page_num}"            
-            logger.info(f"Scraping page {page_num}: {url}")            
-
-            try:
-                html = get_rendered_html(page, url)
-            except Exception as e:
-                logger.error(f"Échec chargement page {page_num}: {e}")
-                continue
-
-            listings = parse_listings(html, page)            
-
-            if not listings:
-                logger.info(f"Aucune annonce trouvée page {page_num}, arrêt.")
-                break
-
-            all_listings.extend(listings)
-            logger.info(f"  -> {len(listings)} annonces récupérées")
-
-            # Délai aléatoire pour ne pas surcharger le serveur
-            time.sleep(random.uniform(*DELAY_RANGE))
-
-        browser.close()
+            for property_type in PROPERTY_TYPES:
+                all_listings.extend(scrape_property_type(page, property_type))
+        finally:
+            browser.close()
 
     return pd.DataFrame(all_listings)
-
 
 def save_data(df: pd.DataFrame) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -232,7 +249,7 @@ def save_data(df: pd.DataFrame) -> Path:
 
 
 def main():
-    logger.info("Début du scraping MadaRentttttttttttttttttt")
+    logger.info("Début du scraping MadaRent")
     df = scrape_all_pages()
 
     if df.empty:
