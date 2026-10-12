@@ -3,7 +3,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
+from sklearn.compose import ColumnTransformer, TransformedTargetRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -55,7 +55,7 @@ def load_and_prepare_data(file_path: Path):
     X = df[feature_cols].copy()
     y = df[target_col].copy()
 
-    # Remplir les valeurs manquantes de 'lieu' par 'Inconnu'
+    # Remplir les valeurs manquantes de 'lieu' et 'type' par 'Inconnu'
     if "lieu" in X.columns:
         X["lieu"] = X["lieu"].fillna("Inconnu").astype(str)
     if "type" in X.columns:
@@ -64,10 +64,10 @@ def load_and_prepare_data(file_path: Path):
     return X, y, cat_features, num_features + bool_features
 
 
-def build_pipeline_onehot(cat_features: list[str], other_features: list[str]) -> Pipeline:
+def build_pipeline_onehot(cat_features: list[str], other_features: list[str]) -> TransformedTargetRegressor:
     """
     Approche 1: One-Hot Encoding avec RandomForest.
-    Encode chaque modalité de catégorie en colonnes binaires (avec handle_unknown='ignore').
+    Intègre une transformation logarithmique log1p sur le prix pour atténuer l'asymétrie.
     """
     preprocessor = ColumnTransformer(
         transformers=[
@@ -85,25 +85,29 @@ def build_pipeline_onehot(cat_features: list[str], other_features: list[str]) ->
         remainder="drop",
     )
 
-    model = Pipeline(
+    base_pipeline = Pipeline(
         steps=[
             ("preprocessor", preprocessor),
             ("regressor", RandomForestRegressor(n_estimators=100, random_state=42)),
         ]
+    )
+
+    # Entraîne le modèle sur log(1 + y) et reconvertit automatiquement les prédictions en Ariary
+    model = TransformedTargetRegressor(
+        regressor=base_pipeline,
+        func=np.log1p,
+        inverse_func=np.expm1,
     )
     return model
 
 
 def build_pipeline_native_categorical(
     cat_features: list[str], other_features: list[str]
-) -> Pipeline:
+) -> TransformedTargetRegressor:
     """
     Approche 2: HistGradientBoosting avec support catégoriel natif.
-    Utilise OrdinalEncoder pour mapper chaque modalité sur un entier,
-    puis HistGradientBoostingRegressor exploite les colonnes catégorielles
-    directement sans explosion du nombre de colonnes (idéal pour haute cardinalité).
+    Intègre également une transformation logarithmique log1p sur le prix.
     """
-    # Dans le ColumnTransformer, les colonnes catégorielles seront en position 0..len(cat_features)-1
     cat_indices = list(range(len(cat_features)))
 
     preprocessor = ColumnTransformer(
@@ -125,7 +129,7 @@ def build_pipeline_native_categorical(
         remainder="drop",
     )
 
-    model = Pipeline(
+    base_pipeline = Pipeline(
         steps=[
             ("preprocessor", preprocessor),
             (
@@ -137,11 +141,17 @@ def build_pipeline_native_categorical(
             ),
         ]
     )
+
+    model = TransformedTargetRegressor(
+        regressor=base_pipeline,
+        func=np.log1p,
+        inverse_func=np.expm1,
+    )
     return model
 
 
-def evaluate_model(name: str, pipeline: Pipeline, X_train, X_test, y_train, y_test, cv_folds=5):
-    """Évalue un pipeline via Cross-Validation et Test set, et affiche les métriques."""
+def evaluate_model(name: str, model, X_train, X_test, y_train, y_test, cv_folds=5):
+    """Évalue un modèle via Cross-Validation et Test set, et affiche les métriques."""
     logger.info(f"--- Évaluation : {name} ---")
 
     # 1. Validation croisée
@@ -151,15 +161,15 @@ def evaluate_model(name: str, pipeline: Pipeline, X_train, X_test, y_train, y_te
         "rmse": "neg_root_mean_squared_error",
         "r2": "r2",
     }
-    cv_results = cross_validate(pipeline, X_train, y_train, cv=cv, scoring=scoring)
+    cv_results = cross_validate(model, X_train, y_train, cv=cv, scoring=scoring)
 
     cv_mae = -cv_results["test_mae"].mean()
     cv_rmse = -cv_results["test_rmse"].mean()
     cv_r2 = cv_results["test_r2"].mean()
 
     # 2. Entraînement sur tout le train set et test final
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
 
     test_mae = mean_absolute_error(y_test, y_pred)
     test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
@@ -181,20 +191,20 @@ def evaluate_model(name: str, pipeline: Pipeline, X_train, X_test, y_train, y_te
     logger.info(
         f"[{name}] Test set   -> MAE: {test_mae:,.0f} Ar | RMSE: {test_rmse:,.0f} Ar | R2: {test_r2:.4f}"
     )
-    return metrics, pipeline
+    return metrics, model
 
 
-def save_best_model(pipeline: Pipeline, model_dir="models") -> Path:
-    """Sauvegarde le modèle pipeline entraîné."""
+def save_best_model(model, model_dir="models") -> Path:
+    """Sauvegarde le modèle complet entraîné."""
     Path(model_dir).mkdir(parents=True, exist_ok=True)
     out_path = Path(model_dir) / "best_rent_model.pkl"
-    joblib.dump(pipeline, out_path)
+    joblib.dump(model, out_path)
     logger.info(f"Modèle sauvegardé avec succès dans : {out_path}")
     return out_path
 
 
 def main():
-    logger.info("Démarrage de l'entraînement et comparaison des modèles...")
+    logger.info("Démarrage de l'entraînement et comparaison des modèles (avec Log-Target)...")
     clean_file = get_latest_clean_file()
     X, y, cat_features, other_features = load_and_prepare_data(clean_file)
 
@@ -206,10 +216,10 @@ def main():
         X, y, test_size=0.2, random_state=42
     )
 
-    # 1. Modèle 1 : One-Hot Encoding + RandomForest
+    # 1. Modèle 1 : One-Hot Encoding + RandomForest (avec Log-Target)
     pipe_onehot = build_pipeline_onehot(cat_features, other_features)
     metrics_onehot, fitted_onehot = evaluate_model(
-        "One-Hot Encoding + Random Forest",
+        "One-Hot Encoding + Random Forest (Log-Target)",
         pipe_onehot,
         X_train,
         X_test,
@@ -217,10 +227,10 @@ def main():
         y_test,
     )
 
-    # 2. Modèle 2 : Support catégoriel natif + HistGradientBoosting
+    # 2. Modèle 2 : Support catégoriel natif + HistGradientBoosting (avec Log-Target)
     pipe_native = build_pipeline_native_categorical(cat_features, other_features)
     metrics_native, fitted_native = evaluate_model(
-        "Catégoriel Natif + HistGradientBoosting",
+        "Catégoriel Natif + HistGradientBoosting (Log-Target)",
         pipe_native,
         X_train,
         X_test,
@@ -229,9 +239,9 @@ def main():
     )
 
     # Tableau comparatif
-    print("\n" + "=" * 70)
-    print("           COMPARAISON DES PERFORMANCES DU MODÈLE")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print("           COMPARAISON DES PERFORMANCES DU MODÈLE (CIBLE LOG)")
+    print("=" * 80)
     comparison_df = pd.DataFrame(
         [
             {
@@ -251,18 +261,18 @@ def main():
         ]
     )
     print(comparison_df.to_string(index=False))
-    print("=" * 70 + "\n")
+    print("=" * 80 + "\n")
 
     # Choix et sauvegarde du meilleur modèle basé sur le test MAE
     if metrics_native["test_mae"] < metrics_onehot["test_mae"]:
         best_name = metrics_native["name"]
-        best_pipe = fitted_native
+        best_model = fitted_native
     else:
         best_name = metrics_onehot["name"]
-        best_pipe = fitted_onehot
+        best_model = fitted_onehot
 
     logger.info(f"Meilleur modèle sélectionné : {best_name}")
-    save_best_model(best_pipe)
+    save_best_model(best_model)
 
 
 if __name__ == "__main__":
