@@ -7,13 +7,14 @@ services:
     container_name: madarent_pipeline
     volumes:
       - ./data:/app/data
+      - madarent_models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
-    # Lance entrypoint.sh : scraper.py → clean.py en séquence
+    # Lance entrypoint.sh : scraper.py → clean.py → train.py en séquence
     restart: "no"
 
   # ── Exécuté ponctuellement (entraînement du modèle) ───────────────────────
-  # Lancer avec : docker-compose --profile train run --rm train
+  # Lancer avec : docker compose --profile train run --rm trainer
   trainer:
     build:
       context: .
@@ -22,9 +23,13 @@ services:
     command: ["python", "pipeline/train.py"]
     volumes:
       - ./data:/app/data
-      - ./models:/app/models
+      - madarent_models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
     restart: "no"
     profiles:
       - train
+
+volumes:
+  madarent_models:
+    external: true
